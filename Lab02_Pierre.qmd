@@ -1,0 +1,145 @@
+---
+title: "Lab02_Pierre"
+author: "Tiago Pierre Fernandes"
+format: pdf
+editor: visual
+---
+
+### Exercício 1:
+
+As estatísticas são o número de voos atrasados (ARRIVAL_DELAY \> 10) e o número total de voos válidos, agrupados por mês, dia e companhia aérea.
+
+## Exercício 2:
+
+```{r}
+library(dplyr)
+
+getStats <- function(input, pos) {
+  input %>%
+    filter(AIRLINE %in% c("AA", "DL", "UA", "US"),
+           !is.na(ARRIVAL_DELAY)) %>%
+    group_by(MONTH,
+             DAY,
+             AIRLINE) %>%
+    summarise(atrasados = sum(ARRIVAL_DELAY > 10),
+              total = n(), .groups = "drop")
+}
+```
+
+## Questão 3:
+
+```{r}
+library(readr)
+
+stats <- read_csv_chunked(
+  "flights.csv",
+  DataFrameCallback$new(getStats),
+  chunk_size = 100000,
+  col_types = cols_only(MONTH = col_integer(),
+                        DAY = col_integer(),
+                        AIRLINE = col_character(),
+                        ARRIVAL_DELAY = col_double())
+)
+```
+
+## Questão 4:
+
+```{r}
+computeStats <- function(stats) {
+  stats %>%
+    group_by(MONTH,
+             DAY,
+             AIRLINE) %>%
+    summarise(atrasados = sum(atrasados),
+              total = sum(total),
+              .groups = "drop") %>%
+    mutate(Cia = AIRLINE,
+           Data = as.Date(paste(2015, MONTH, DAY, sep = "-")),
+           Perc = atrasados / total) %>%
+    select(Cia,
+           Data,
+           Perc)
+}
+
+stats <- computeStats(stats)
+```
+
+## Questão 5:
+
+```{r}
+library(ggplot2)
+
+pal <- scale_fill_gradient(
+  low = "#4575b4",
+  high = "#d73027"
+)
+
+baseCalendario <- function(stats, cia) {
+  stats %>%
+    filter(Cia == cia) %>%
+    mutate(semana = as.numeric(format(Data, "%U")),
+           dia_semana = as.numeric(format(Data, "%w")))
+}
+
+cAA <- baseCalendario(stats, "AA")
+cDL <- baseCalendario(stats, "DL")
+cUA <- baseCalendario(stats, "UA")
+cUS <- baseCalendario(stats, "US")
+
+ggplot(cAA,
+       aes(x = dia_semana,
+           y = semana,
+           fill = Perc)) +
+  geom_tile() +
+  pal +
+  scale_x_continuous(breaks = 0:6,
+                     labels = c("Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb")) +
+  scale_y_reverse() +
+  ggtitle("Percentual de voos atrasados - AA") +
+  labs(x = NULL,
+       y = NULL,
+       fill = "Atrasos") +
+  theme_minimal()
+
+ggplot(cDL, aes(x = dia_semana,
+                y = semana,
+                fill = Perc)) +
+  geom_tile() +
+  pal +
+  scale_x_continuous(breaks = 0:6,
+                     labels = c("Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb")) +
+  scale_y_reverse() +
+  ggtitle("Percentual de voos atrasados - DL") +
+  labs(x = NULL,
+       y = NULL,
+       fill = "Atrasos") +
+  theme_minimal()
+
+ggplot(cUA, aes(x = dia_semana,
+                y = semana,
+                fill = Perc)) +
+  geom_tile() +
+  pal +
+  scale_x_continuous(breaks = 0:6,
+                     labels = c("Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb")) +
+  scale_y_reverse() +
+  ggtitle("Percentual de voos atrasados - UA") +
+  labs(x = NULL,
+       y = NULL,
+       fill = "Atrasos") +
+  theme_minimal()
+
+ggplot(cUS, aes(x = dia_semana,
+                y = semana,
+                fill = Perc)) +
+  geom_tile() +
+  pal +
+  scale_x_continuous(breaks = 0:6,
+                     labels = c("Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb")) +
+  scale_y_reverse() +
+  ggtitle("Percentual de voos atrasados - US") +
+  labs(x = NULL,
+       y = NULL,
+       fill = "Atrasos") +
+  theme_minimal()
+```
