@@ -1,0 +1,98 @@
+---
+title: "Lab02_Pierre"
+author: "Tiago Pierre Fernandes"
+format: pdf
+editor: visual
+---
+
+## QUESTÃO 1:
+
+As estatísticas que são suficientes são os número de voos com ARRIVAL_DELAY \> 10 e o número de voos válidos, agrupados por mês, dia e companhia aérea.
+
+## QUESTÃO 2:
+
+```{r}
+library(dplyr)
+
+getStats <- function(input, pos) {
+  input %>%
+    filter(AIRLINE %in% c("AA", "DL", "UA", "US"), 
+           !is.na(ARRIVAL_DELAY)) %>%
+    group_by(MONTH, DAY, AIRLINE) %>%
+    summarise(atrasados = sum(ARRIVAL_DELAY > 10), 
+              total = n(), 
+              .groups = "drop")
+}
+```
+
+## QUESTÃO 3:
+
+```{r}
+library(readr)
+
+stats <- read_csv_chunked(
+  "flights.csv.zip",
+  DataFrameCallback$new(getStats),
+  chunk_size = 100000,
+  col_types = cols_only(MONTH = col_integer(), 
+                        DAY = col_integer(), 
+                        AIRLINE = col_character(), 
+                        ARRIVAL_DELAY = col_double())
+)
+```
+
+## QUESTÃO 4:
+
+```{r}
+computeStats <- function(stats) {
+  stats %>%
+    group_by(MONTH, DAY, AIRLINE) %>%
+    summarise(atrasados = sum(atrasados), 
+              total = sum(total), 
+              .groups = "drop") %>%
+    mutate(Cia = AIRLINE, 
+           Data = as.Date(paste(2015, MONTH, DAY, sep = "-")), 
+           Perc = atrasados / total) %>%
+    select(Cia, Data, Perc)
+}
+
+stats <- computeStats(stats)
+```
+
+## QUESTÃO 5:
+
+```{r}
+library(devtools)
+library(ggcal)
+library(ggplot2)
+
+pal <- scale_fill_gradient(low = "#4575b4", high = "#d73027")
+
+baseCalendario <- function(stats, cia) {
+  dados <- stats %>%
+    filter(Cia == cia)
+
+  ggcal(dados$Data, dados$Perc)
+}
+
+cAA <- baseCalendario(stats, "AA")
+cDL <- baseCalendario(stats, "DL")
+cUA <- baseCalendario(stats, "UA")
+cUS <- baseCalendario(stats, "US")
+
+cAA +
+  pal +
+  ggtitle("Percentual de voos atrasados - AA")
+
+cDL +
+  pal +
+  ggtitle("Percentual de voos atrasados - DL")
+
+cUA +
+  pal +
+  ggtitle("Percentual de voos atrasados - UA")
+
+cUS +
+  pal +
+  ggtitle("Percentual de voos atrasados - US")
+```
