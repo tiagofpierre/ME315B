@@ -1,0 +1,108 @@
+---
+title: "Lab03 - ME315"
+author: "Tiago Pierre Fernandes"
+format: pdf
+editor: visual
+---
+
+```{r}
+
+library(readr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(leaflet)
+
+```
+
+
+# Questão 1
+
+```{r}
+
+airports <- read_csv("airports.csv", 
+                     col_select = c(IATA_CODE, CITY, STATE, LATITUDE, LONGITUDE))
+
+airlines <- read_csv("airlines.csv")
+
+processa_bloco <- function(bloco, pos) {
+  bloco %>%
+    filter(!str_starts(DESTINATION_AIRPORT, "1")) %>%
+    drop_na() %>%
+    group_by(DESTINATION_AIRPORT) %>%
+    summarise(soma_atraso = sum(ARRIVAL_DELAY), n_voos = n(), .groups = "drop")
+}
+
+estatisticas_parciais <- read_csv_chunked(
+  "flights.csv.zip",
+  callback = DataFrameCallback$new(processa_bloco),
+  chunk_size = 1e6,
+  col_types = cols_only(
+    DESTINATION_AIRPORT = col_character(),
+    ARRIVAL_DELAY = col_double()
+  )
+)
+
+flights <- estatisticas_parciais %>%
+  group_by(DESTINATION_AIRPORT) %>%
+  summarise(
+    atraso_medio = sum(soma_atraso) / sum(n_voos),
+    n_voos = sum(n_voos),
+    .groups = "drop"
+  )
+
+```
+
+
+# Questão 2
+
+```{r}
+
+# A chave na tabela 'flights' é 'DESTINATION_AIRPORT'
+# A chave na tabela 'airports' é 'IATA_CODE'
+
+anti_join(flights, airports, by = c("DESTINATION_AIRPORT" = "IATA_CODE"))
+
+flights <- flights %>%
+  left_join(airports, by = c("DESTINATION_AIRPORT" = "IATA_CODE"))
+
+```
+
+
+# Questão 3
+
+```{r}
+airports %>%
+  count(STATE, name = "n_aeroportos") %>%
+  arrange(desc(n_aeroportos))
+```
+
+
+# Questão 4
+
+```{r}
+
+dados_mapa <- flights %>%
+  drop_na(LATITUDE, LONGITUDE)
+
+this <- leaflet(data = dados_mapa) %>%
+  addTiles() %>%
+  addMarkers(
+    lng = ~LONGITUDE,
+    lat = ~LATITUDE,
+    popup = ~paste0(
+      DESTINATION_AIRPORT, " — ", CITY, ", ", STATE, "<br>",
+      "Atraso médio: ", round(atraso_medio, 1), " min<br>",
+      "Voos: ", n_voos
+    )
+  )
+
+this
+
+```
+
+```{r}
+Sys.setenv(TZ = "America/Sao_Paulo")
+Sys.time()
+```
+
