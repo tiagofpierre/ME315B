@@ -1,0 +1,267 @@
+---
+title: "Lab 05 - ME315"
+author: "Tiago Pierre Fernandes"
+format: pdf
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(leaflet)
+
+analisa_aeronave <- function(
+    tail_number,
+    arquivo,
+    arquivo_airports = "airports.csv") {
+  
+  dados_aeroportos <- read_csv(arquivo_airports, col_types = cols(
+    IATA_CODE = col_character(),
+    AIRPORT = col_character(),
+    LATITUDE = col_double(),
+    LONGITUDE = col_double()), show_col_types = FALSE) %>%
+    select(IATA_CODE, AIRPORT, LATITUDE, LONGITUDE)
+  
+  voos_filtrados <- read_csv_chunked(
+    file = arquivo, 
+    callback = DataFrameCallback$new(
+      function(chunk, index) {
+        chunk %>%
+          filter(TAIL_NUMBER == !!tail_number)}),
+    chunk_size = 100000,
+    col_types = cols(
+      YEAR = col_double(),
+      MONTH = col_double(),
+      DAY = col_double(),
+      SCHEDULED_DEPARTURE = col_double(),
+      TAIL_NUMBER = col_character(),
+      ORIGIN_AIRPORT = col_character(),
+      DESTINATION_AIRPORT = col_character(),
+      DISTANCE = col_double(),
+      AIR_TIME = col_double()), show_col_types = FALSE)
+  
+  if (nrow(voos_filtrados) == 0) {
+    stop(paste0("Nenhum voo encontrado para o TAIL_NUMBER '", 
+                tail_number, "'."))}
+  
+  tabela_trajetos <- voos_filtrados %>%
+    mutate(
+      horario_num = as.integer(SCHEDULED_DEPARTURE),
+      data_hora_decolagem = make_datetime(
+        year = as.integer(YEAR),
+        month = as.integer(MONTH),
+        day = as.integer(DAY),
+        hour = horario_num %/% 100,
+        min = horario_num %% 100)) %>%
+    arrange(data_hora_decolagem) %>%
+    left_join(dados_aeroportos, by = c("ORIGIN_AIRPORT" = "IATA_CODE")) %>%
+    rename(nome_origem = AIRPORT, lat_origem = LATITUDE, lon_origem = LONGITUDE) %>%
+    left_join(dados_aeroportos, by = c("DESTINATION_AIRPORT" = "IATA_CODE")) %>%
+    rename(nome_destino = AIRPORT, lat_destino = LATITUDE, lon_destino = LONGITUDE) %>%
+    mutate(
+      velocidade_media = if_else(
+        !is.na(AIR_TIME) & AIR_TIME > 0,
+        (DISTANCE / AIR_TIME) * 60,
+        NA_real_))
+  
+  sequencia_trajeto <- c(
+    tabela_trajetos$ORIGIN_AIRPORT[1],
+    tabela_trajetos$DESTINATION_AIRPORT)
+  
+  sequencia_trajeto <- paste(
+    sequencia_trajeto,
+    collapse = " → ")
+  
+  velocidades_validas <- tabela_trajetos$velocidade_media[
+    !is.na(tabela_trajetos$velocidade_media)]
+  
+  if (length(velocidades_validas) == 0) {
+    tabela_trajetos <- tabela_trajetos %>%
+      mutate(espessura_linha = 2)
+    
+  } else if (length(unique(velocidades_validas)) == 1) {
+    
+    tabela_trajetos <- tabela_trajetos %>%
+      mutate(espessura_linha = if_else(is.na(velocidade_media), 2, 3))
+    
+  } else {
+    
+    tabela_trajetos <- tabela_trajetos %>%
+      mutate(
+        espessura_linha = if_else(
+          is.na(velocidade_media),
+          2,
+          scales::rescale(
+            velocidade_media,
+            to = c(1, 6),
+            from = range(
+              velocidade_media,
+              na.rm = TRUE))))}
+  
+  dados_mapa <- tabela_trajetos %>%
+    filter(!is.na(lat_origem), 
+           !is.na(lon_origem), 
+           !is.na(lat_destino), 
+           !is.na(lon_destino))
+  
+  aeroportos_visitados <- bind_rows(
+    tabela_trajetos %>%
+      transmute(
+        IATA = ORIGIN_AIRPORT,
+        nome = nome_origem,
+        lat = lat_origem,
+        lon = lon_origem), tabela_trajetos %>%
+      transmute(
+        IATA = DESTINATION_AIRPORT,
+        nome = nome_destino,
+        lat = lat_destino,
+        lon = lon_destino)) %>%
+    filter(!is.na(lat), !is.na(lon)) %>%
+    distinct(IATA, .keep_all = TRUE)
+  
+  numero_voos <- nrow(tabela_trajetos)
+  
+  numero_aeroportos <- nrow(aeroportos_visitados)
+  
+  velocidade_media_geral <- mean(
+    tabela_trajetos$velocidade_media,
+    na.rm = TRUE)
+  
+  if (is.nan(velocidade_media_geral)) {
+    velocidade_media_geral <- NA_real_}
+  
+  mapa_trajetos <- leaflet() %>%
+    addTiles()
+  
+  if (nrow(dados_mapa) > 0) {
+    
+    for (i in seq_len(nrow(dados_mapa))) {
+      
+      voo <- dados_mapa[i, ]
+      
+      pop_info <- paste0(
+        "<b>Aeronave:</b> ", tail_number,
+        "<br>",
+        "<b>Data:</b> ",
+        format(
+          voo$data_hora_decolagem,
+          "%d/%m/%Y %H:%M"
+        ),
+        "<br>",
+        "<b>Origem:</b> ",
+        voo$ORIGIN_AIRPORT,
+        " - ",
+        voo$nome_origem,
+        "<br>",
+        "<b>Destino:</b> ",
+        voo$DESTINATION_AIRPORT,
+        " - ",
+        voo$nome_destino,
+        "<br>",
+        "<b>Distância:</b> ",
+        round(voo$DISTANCE, 1),
+        " milhas",
+        "<br>",
+        "<b>Tempo de voo:</b> ",
+        ifelse(
+          is.na(voo$AIR_TIME),
+          "N/A",
+          paste0(
+            round(voo$AIR_TIME, 0),
+            " minutos")),
+        "<br>",
+        "<b>Velocidade média:</b> ",
+        ifelse(
+          is.na(voo$velocidade_media),
+          "N/A",
+          paste0(
+            round(voo$velocidade_media, 1),
+            " mph")))
+      
+      mapa_trajetos <- mapa_trajetos %>%
+        addPolylines(
+          lng = c(
+            voo$lon_origem,
+            voo$lon_destino),
+          lat = c(
+            voo$lat_origem,
+            voo$lat_destino),
+          weight = voo$espessura_linha,
+          opacity = 0.7,
+          color = "blue",
+          popup = pop_info)}}
+  
+  if (nrow(aeroportos_visitados) > 0) {
+    
+    mapa_trajetos <- mapa_trajetos %>%
+      addCircleMarkers(
+        data = aeroportos_visitados,
+        lng = ~lon,
+        lat = ~lat,
+        radius = 5,
+        color = "red",
+        fillOpacity = 0.8,
+        popup = ~paste0(
+          "<b>",
+          IATA,
+          "</b>",
+          "<br>",
+          nome), label = ~IATA)}
+  
+  velocidade_texto <- ifelse(
+    is.na(velocidade_media_geral),
+    "N/A",
+    paste0(
+      round(velocidade_media_geral, 1),
+      " mph"))
+  
+  estatisticas <- paste0(
+    "<div style='
+      background-color: white;
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+      font-size: 13px;
+    '>",
+    "<b>Aeronave:</b> ",
+    tail_number,
+    "<br>",
+    "<b>Número de voos:</b> ",
+    numero_voos,
+    "<br>",
+    "<b>Aeroportos visitados:</b> ",
+    numero_aeroportos,
+    "<br>",
+    "<b>Velocidade média:</b> ",
+    velocidade_texto,
+    "<br>",
+    "<b>Trajeto:</b> ",
+    sequencia_trajeto,
+    "</div>")
+  
+  mapa_trajetos <- mapa_trajetos %>%
+    addControl(
+      html = estatisticas,
+      position = "topright")
+  
+  return(
+    list(
+      tabela = tabela_trajetos,
+      mapa = mapa_trajetos))}
+```
+
+```{r}
+resultado <- analisa_aeronave(
+  tail_number = "N431WN",
+  arquivo = "flights.csv.zip",
+  arquivo_airports = "airports.csv"
+)
+
+resultado$tabela
+resultado$mapa
+```
+
+```{r}
+Sys.setenv(TZ = "America/Sao_Paulo")
+Sys.time()
+```
