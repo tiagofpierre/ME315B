@@ -1,0 +1,190 @@
+---
+title: "Lab 07 - ME315"
+author: "Tiago Pierre"
+format: pdf
+editor: visual
+---
+
+```{r}
+library(RSQLite)
+conn <- dbConnect(SQLite(), "uwmadison.sqlite3")
+```
+
+```{r}
+sql_professores <- "
+SELECT DISTINCT
+    i.id,
+    i.name
+FROM instructors AS i
+INNER JOIN teachings AS t
+    ON t.instructor_id = i.id
+INNER JOIN sections AS sec
+    ON sec.uuid = t.section_uuid
+INNER JOIN course_offerings AS co
+    ON co.uuid = sec.course_offering_uuid
+INNER JOIN subject_memberships AS sm
+    ON sm.course_offering_uuid = co.uuid
+INNER JOIN subjects AS s
+    ON s.code = sm.subject_code
+WHERE s.abbreviation = 'STAT'
+ORDER BY i.name;
+"
+
+professores <- dbGetQuery(conn, sql_professores)
+
+cat("Número de professores:", nrow(professores), "\n\n")
+print(professores)
+```
+
+```{r}
+sql_gpa_professores <- "
+SELECT
+    i.name AS professor,
+
+    (
+        SUM(
+            gd.a_count * 4.0 +
+            gd.ab_count * 3.5 +
+            gd.b_count * 3.0 +
+            gd.bc_count * 2.5 +
+            gd.c_count * 2.0 +
+            gd.d_count * 1.0
+        )
+        /
+        SUM(
+            gd.a_count +
+            gd.ab_count +
+            gd.b_count +
+            gd.bc_count +
+            gd.c_count +
+            gd.d_count +
+            gd.f_count
+        )
+    ) AS gpa
+
+FROM instructors AS i
+
+INNER JOIN teachings AS t
+    ON t.instructor_id = i.id
+
+INNER JOIN sections AS sec
+    ON sec.uuid = t.section_uuid
+
+INNER JOIN course_offerings AS co
+    ON co.uuid = sec.course_offering_uuid
+
+INNER JOIN grade_distributions AS gd
+    ON gd.course_offering_uuid = co.uuid
+
+INNER JOIN subject_memberships AS sm
+    ON sm.course_offering_uuid = co.uuid
+
+INNER JOIN subjects AS s
+    ON s.code = sm.subject_code
+
+WHERE s.abbreviation = 'STAT'
+
+GROUP BY i.id, i.name
+
+HAVING SUM(
+    gd.a_count +
+    gd.ab_count +
+    gd.b_count +
+    gd.bc_count +
+    gd.c_count +
+    gd.d_count +
+    gd.f_count
+) > 0
+
+ORDER BY gpa;
+"
+
+gpa_professores <- dbGetQuery(conn, sql_gpa_professores)
+
+professor_dificil <- gpa_professores[1, ]
+professor_facil <- gpa_professores[nrow(gpa_professores), ]
+
+cat("Professor mais difícil:\n")
+print(professor_dificil)
+
+cat("\nProfessor mais fácil:\n")
+print(professor_facil)
+```
+```{r}
+sql_gpa_disciplinas <- "
+SELECT
+    c.number,
+    c.name AS disciplina,
+
+    (
+        SUM(
+            gd.a_count * 4.0 +
+            gd.ab_count * 3.5 +
+            gd.b_count * 3.0 +
+            gd.bc_count * 2.5 +
+            gd.c_count * 2.0 +
+            gd.d_count
+        )
+        /
+        SUM(
+            gd.a_count +
+            gd.ab_count +
+            gd.b_count +
+            gd.bc_count +
+            gd.c_count +
+            gd.d_count +
+            gd.f_count
+        )
+    ) AS gpa
+
+FROM courses AS c
+
+INNER JOIN course_offerings AS co
+    ON co.course_uuid = c.uuid
+
+INNER JOIN grade_distributions AS gd
+    ON gd.course_offering_uuid = co.uuid
+
+INNER JOIN subject_memberships AS sm
+    ON sm.course_offering_uuid = co.uuid
+
+INNER JOIN subjects AS s
+    ON s.code = sm.subject_code
+
+WHERE s.abbreviation = 'STAT'
+
+GROUP BY c.uuid, c.number, c.name
+
+HAVING SUM(
+    gd.a_count +
+    gd.ab_count +
+    gd.b_count +
+    gd.bc_count +
+    gd.c_count +
+    gd.d_count +
+    gd.f_count
+) > 0
+
+ORDER BY gpa;
+"
+
+gpa_disciplinas <- dbGetQuery(conn, sql_gpa_disciplinas)
+
+disciplina_dificil <- gpa_disciplinas[1, ]
+disciplina_facil <- gpa_disciplinas[nrow(gpa_disciplinas), ]
+
+cat("\nDisciplina mais difícil:\n")
+print(disciplina_dificil)
+
+cat("\nDisciplina mais fácil:\n")
+print(disciplina_facil)
+```
+
+```{r}
+dbDisconnect(conn)
+```
+
+```{r}
+Sys.setenv(TZ = "America/Sao_Paulo")
+Sys.time()
+```
